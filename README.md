@@ -23,10 +23,9 @@ npm run dev
 
 API em `http://localhost:3333`.
 
-## Login seed
+## Conta
 
-- e-mail: `edipo@pouapp.com`
-- senha: `Edipo123`
+Não há usuário seed. Crie a conta no app ou via `POST /auth/register` (senha forte: 8+ com letra e número).
 
 ## Rotas
 
@@ -46,6 +45,13 @@ API em `http://localhost:3333`.
 | PATCH | `/products/:id` | sim | atualiza produto |
 | GET | `/business/profile` | sim | perfil Pix |
 | PUT | `/business/profile` | sim | salva chave Pix |
+| GET | `/notes` | sim | lista notas |
+| POST | `/notes` | sim | cria nota (draft/delivered) |
+| GET | `/sales` | sim | lista vendas a receber |
+| POST | `/sales` | sim | cria venda |
+| GET | `/receipts` | sim | lista recebimentos |
+| POST | `/receipts` | sim | registra recebimento |
+| GET | `/workspace/home` | sim | agregados da home (`?date=`) |
 
 ## Auth seguro
 
@@ -61,15 +67,18 @@ API em `http://localhost:3333`.
 ```bash
 curl -s http://localhost:3333/health
 
-LOGIN=$(curl -s -X POST http://localhost:3333/auth/login \
+LOGIN=$(curl -s -X POST http://localhost:3333/auth/register \
   -H 'content-type: application/json' \
-  -d '{"email":"edipo@pouapp.com","password":"Edipo123"}')
+  -d '{"name":"Edipo Silva","email":"edipo@pouapp.com","password":"Senha123"}')
 
 ACCESS=$(echo "$LOGIN" | jq -r .accessToken)
 REFRESH=$(echo "$LOGIN" | jq -r .refreshToken)
 
 curl -s http://localhost:3333/auth/me \
   -H "authorization: Bearer $ACCESS"
+
+curl -s http://localhost:3333/workspace/home \
+  -H "authorization: Bearer $ACCESS" | jq .
 
 LOGIN=$(curl -s -X POST http://localhost:3333/auth/refresh \
   -H 'content-type: application/json' \

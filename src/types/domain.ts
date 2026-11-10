@@ -2,6 +2,7 @@ export type CustomerStatus = 'active' | 'inactive';
 export type CustomerType = 'individual' | 'company';
 export type PixKeyType = 'cpfCnpj' | 'phone' | 'email' | 'random';
 export type CatalogUnit = 'kilogram' | 'piece' | 'bunch' | 'box' | 'dozen';
+export type NoteStatus = 'draft' | 'delivered';
 
 export interface User {
   id: string;
@@ -59,4 +60,57 @@ export interface RefreshSession {
   revokedAt?: number;
   createdAt: number;
   replacedById?: string;
+}
+
+export interface CustomerNote {
+  id: string;
+  customerId: string;
+  status: NoteStatus;
+  dueOn: string;
+  totalCents: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PostedSale {
+  id: string;
+  customerId: string;
+  totalCents: number;
+  allocatedCents: number;
+  occurredOn: string;
+  dueOn: string;
+  sale: true;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReceiptAllocation {
+  saleId: string;
+  amountCents: number;
+}
+
+export interface Receipt {
+  id: string;
+  customerId: string;
+  paidOn: string;
+  amountCents: number;
+  allocations: ReceiptAllocation[];
+  createdAt: string;
+}
+
+export interface HomeDueItem {
+  customerId: string;
+  customerName: string;
+  openCents: number;
+  dueOn: string;
+  openNotes?: number;
+  settled?: boolean;
+}
+
+export interface HomeBoard {
+  date: string;
+  receivedTodayCents: number;
+  receiptsDueToday: HomeDueItem[];
+  duesTomorrow: HomeDueItem[];
+  upcomingDues: HomeDueItem[];
 }

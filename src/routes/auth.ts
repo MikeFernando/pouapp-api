@@ -23,16 +23,22 @@ export const authRouter = Router();
 const DUMMY_PASSWORD_HASH =
   '$2b$12$Se/F6FfPqBuofpWkHMOGaeBQ.gcx4aojgrmGNsqVfSjWMPvTvTmWy';
 
-const passwordSchema = z
+const strongPasswordSchema = z
   .string()
   .min(8, 'Senha deve ter no mínimo 8 caracteres.')
   .regex(/[A-Za-z]/, 'Senha deve conter pelo menos uma letra.')
   .regex(/[0-9]/, 'Senha deve conter pelo menos um número.');
 
-const credentialsSchema = z.object({
+const registerSchema = z.object({
   email: z.string().email().transform((value) => value.trim().toLowerCase()),
-  password: passwordSchema,
+  password: strongPasswordSchema,
   name: z.string().min(2).max(120).optional(),
+});
+
+/** Login only checks presence — wrong passwords become 401, not 400. */
+const loginSchema = z.object({
+  email: z.string().email().transform((value) => value.trim().toLowerCase()),
+  password: z.string().min(1),
 });
 
 const refreshSchema = z.object({
@@ -41,7 +47,7 @@ const refreshSchema = z.object({
 
 authRouter.post('/auth/register', authRateLimit, async (req, res, next) => {
   try {
-    const body = credentialsSchema.parse(req.body);
+    const body = registerSchema.parse(req.body);
     if (store.findUserByEmail(body.email)) {
       throw new HttpError(409, 'E-mail já cadastrado.');
     }
@@ -74,7 +80,7 @@ authRouter.post('/auth/register', authRateLimit, async (req, res, next) => {
 
 authRouter.post('/auth/login', authRateLimit, async (req, res, next) => {
   try {
-    const body = credentialsSchema.omit({ name: true }).parse(req.body);
+    const body = loginSchema.parse(req.body);
     const ip = clientIp(req);
     assertNotLocked(body.email, ip);
 

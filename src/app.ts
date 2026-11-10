@@ -7,7 +7,11 @@ import { authRouter } from './routes/auth.js';
 import { businessRouter } from './routes/business.js';
 import { customersRouter } from './routes/customers.js';
 import { healthRouter } from './routes/health.js';
+import { notesRouter } from './routes/notes.js';
 import { productsRouter } from './routes/products.js';
+import { receiptsRouter } from './routes/receipts.js';
+import { salesRouter } from './routes/sales.js';
+import { workspaceRouter } from './routes/workspace.js';
 
 export function createApp() {
   const app = express();
@@ -26,6 +30,10 @@ export function createApp() {
   app.use(customersRouter);
   app.use(productsRouter);
   app.use(businessRouter);
+  app.use(notesRouter);
+  app.use(salesRouter);
+  app.use(receiptsRouter);
+  app.use(workspaceRouter);
 
   app.use(notFound);
   app.use(errorHandler);

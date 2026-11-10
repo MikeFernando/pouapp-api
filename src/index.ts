@@ -6,9 +6,9 @@ async function main() {
   await store.seed();
   const app = createApp();
 
-  app.listen(env.port, () => {
-    console.log(`pouapp-api listening on http://localhost:${env.port}`);
-    console.log('seed login: edipo@pouapp.com / Edipo123');
+  app.listen(env.port, '0.0.0.0', () => {
+    console.log(`pouapp-api listening on http://0.0.0.0:${env.port}`);
+    console.log('no seed user — create an account via /auth/register');
   });
 }
 
