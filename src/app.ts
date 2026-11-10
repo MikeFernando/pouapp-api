@@ -7,10 +7,12 @@ import { authRouter } from './routes/auth.js';
 import { businessRouter } from './routes/business.js';
 import { customersRouter } from './routes/customers.js';
 import { healthRouter } from './routes/health.js';
+import { licenseRouter } from './routes/license.js';
 import { notesRouter } from './routes/notes.js';
 import { productsRouter } from './routes/products.js';
 import { receiptsRouter } from './routes/receipts.js';
 import { salesRouter } from './routes/sales.js';
+import { stripeWebhookRouter } from './routes/stripe-webhook.js';
 import { workspaceRouter } from './routes/workspace.js';
 
 export function createApp() {
@@ -23,10 +25,19 @@ export function createApp() {
       origin: env.corsOrigin === '*' ? true : env.corsOrigin.split(','),
     }),
   );
+
+  // Stripe signature verification needs the raw body — before JSON parser.
+  app.use(
+    '/webhooks/stripe',
+    express.raw({ type: 'application/json', limit: '1mb' }),
+    stripeWebhookRouter,
+  );
+
   app.use(express.json({ limit: '32kb' }));
 
   app.use(healthRouter);
   app.use(authRouter);
+  app.use(licenseRouter);
   app.use(customersRouter);
   app.use(productsRouter);
   app.use(businessRouter);

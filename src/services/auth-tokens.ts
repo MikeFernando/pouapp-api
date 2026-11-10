@@ -108,6 +108,7 @@ export function rotateRefreshToken(rawRefreshToken: string): {
 
   if (existing.expiresAt <= Date.now()) {
     existing.revokedAt = Date.now();
+    store.touch();
     throw new HttpError(401, 'Refresh token expirado.');
   }
 
@@ -120,6 +121,7 @@ export function rotateRefreshToken(rawRefreshToken: string): {
   existing.revokedAt = Date.now();
   const next = createRefreshSession(existing.userId, existing.familyId);
   existing.replacedById = next.session.id;
+  store.touch();
 
   const { accessToken, expiresIn } = signAccessToken(user.id, user.email);
   return {

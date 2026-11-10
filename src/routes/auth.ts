@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { requireLicenseAdmin } from '../middleware/admin.js';
 import { HttpError } from '../middleware/error.js';
 import { clientIp, requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { authRateLimit, refreshRateLimit } from '../middleware/rate-limit.js';
@@ -15,6 +16,7 @@ import {
   clearLoginFailures,
   registerLoginFailure,
 } from '../services/login-guard.js';
+import { env } from '../config/env.js';
 import { BCRYPT_COST, store } from '../services/store.js';
 
 export const authRouter = Router();
@@ -67,6 +69,7 @@ authRouter.post('/auth/register', authRateLimit, async (req, res, next) => {
       receiverName: user.name,
       updatedAt: now,
     });
+    store.ensureLicense(user.id, { trialDays: env.licenseTrialDays });
 
     const tokens = issueTokenPair(user.id, user.email);
     res.status(201).json({
@@ -145,6 +148,57 @@ authRouter.get('/auth/me', requireAuth, (req: AuthedRequest, res, next) => {
     next(error);
   }
 });
+
+/**
+ * Client taps “Esqueceu a senha?” → WhatsApp reaches you.
+ * Then reset here (auto-generates a temporary password if omitted).
+ * Header: X-License-Admin-Key
+ */
+authRouter.put(
+  '/admin/password',
+  requireLicenseAdmin,
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          email: z
+            .string()
+            .email()
+            .transform((value) => value.trim().toLowerCase()),
+          newPassword: strongPasswordSchema.optional(),
+        })
+        .parse(req.body);
+
+      const user = store.findUserByEmail(body.email);
+      if (!user) throw new HttpError(404, 'Usuário não encontrado.');
+
+      const temporaryPassword = body.newPassword ?? generateTemporaryPassword();
+      user.passwordHash = await bcrypt.hash(temporaryPassword, BCRYPT_COST);
+      user.updatedAt = new Date().toISOString();
+      store.users.set(user.id, user);
+      store.revokeAllRefreshForUser(user.id);
+
+      res.json({
+        user: publicUser(user),
+        temporaryPassword,
+        message: 'Senha redefinida. Envie temporaryPassword ao cliente no WhatsApp.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+function generateTemporaryPassword(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = randomBytes(10);
+  let out = '';
+  for (const byte of bytes) {
+    out += alphabet[byte % alphabet.length]!;
+  }
+  // Guarantee schema: letter + number.
+  return `Pou${out}1`;
+}
 
 function publicUser(user: { id: string; name: string; email: string }) {
   return {

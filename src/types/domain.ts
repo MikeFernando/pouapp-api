@@ -41,6 +41,33 @@ export interface BusinessProfile {
   updatedAt: string;
 }
 
+/** Billing status for the tenant account (Stripe / manual). */
+export type LicenseStatus = 'active' | 'past_due' | 'canceled' | 'unpaid';
+
+export interface License {
+  userId: string;
+  status: LicenseStatus;
+  /** Inclusive end of paid period (ISO). Null means never paid / no access. */
+  paidUntil: string | null;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  updatedAt: string;
+}
+
+/** Why the app should block when active=false. */
+export type LicenseBlockReason = 'payment_required' | 'wrong_email';
+
+export interface LicenseView {
+  active: boolean;
+  status: LicenseStatus;
+  paidUntil: string | null;
+  message: string | null;
+  /** Null when the license is active. */
+  reason: LicenseBlockReason | null;
+  /** Set when reason=wrong_email — the email that currently holds payment. */
+  paidEmail: string | null;
+}
+
 export interface AuthTokenPayload {
   sub: string;
   email: string;
