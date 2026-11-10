@@ -43,4 +43,20 @@ export interface BusinessProfile {
 export interface AuthTokenPayload {
   sub: string;
   email: string;
+  iss?: string;
+  aud?: string | string[];
+  jti?: string;
+  iat?: number;
+  exp?: number;
+}
+
+export interface RefreshSession {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  familyId: string;
+  expiresAt: number;
+  revokedAt?: number;
+  createdAt: number;
+  replacedById?: string;
 }

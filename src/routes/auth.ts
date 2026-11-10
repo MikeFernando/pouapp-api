@@ -1,22 +1,45 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { env } from '../config/env.js';
 import { HttpError } from '../middleware/error.js';
-import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
-import { store } from '../services/store.js';
+import { clientIp, requireAuth, type AuthedRequest } from '../middleware/auth.js';
+import { authRateLimit, refreshRateLimit } from '../middleware/rate-limit.js';
+import {
+  issueTokenPair,
+  revokeRefreshToken,
+  rotateRefreshToken,
+} from '../services/auth-tokens.js';
+import {
+  assertNotLocked,
+  clearLoginFailures,
+  registerLoginFailure,
+} from '../services/login-guard.js';
+import { BCRYPT_COST, store } from '../services/store.js';
 
 export const authRouter = Router();
 
+/** Precomputed bcrypt hash used only to keep login timing uniform. */
+const DUMMY_PASSWORD_HASH =
+  '$2b$12$Se/F6FfPqBuofpWkHMOGaeBQ.gcx4aojgrmGNsqVfSjWMPvTvTmWy';
+
+const passwordSchema = z
+  .string()
+  .min(8, 'Senha deve ter no mínimo 8 caracteres.')
+  .regex(/[A-Za-z]/, 'Senha deve conter pelo menos uma letra.')
+  .regex(/[0-9]/, 'Senha deve conter pelo menos um número.');
+
 const credentialsSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
-  name: z.string().min(2).optional(),
+  email: z.string().email().transform((value) => value.trim().toLowerCase()),
+  password: passwordSchema,
+  name: z.string().min(2).max(120).optional(),
 });
 
-authRouter.post('/auth/register', async (req, res, next) => {
+const refreshSchema = z.object({
+  refreshToken: z.string().min(20),
+});
+
+authRouter.post('/auth/register', authRateLimit, async (req, res, next) => {
   try {
     const body = credentialsSchema.parse(req.body);
     if (store.findUserByEmail(body.email)) {
@@ -26,9 +49,9 @@ authRouter.post('/auth/register', async (req, res, next) => {
     const now = new Date().toISOString();
     const user = {
       id: randomUUID(),
-      name: body.name?.trim() || body.email.split('@')[0],
-      email: body.email.toLowerCase(),
-      passwordHash: await bcrypt.hash(body.password, 10),
+      name: body.name?.trim() || body.email.split('@')[0]!,
+      email: body.email,
+      passwordHash: await bcrypt.hash(body.password, BCRYPT_COST),
       createdAt: now,
       updatedAt: now,
     };
@@ -39,9 +62,9 @@ authRouter.post('/auth/register', async (req, res, next) => {
       updatedAt: now,
     });
 
-    const token = signToken(user.id, user.email);
+    const tokens = issueTokenPair(user.id, user.email);
     res.status(201).json({
-      token,
+      ...tokens,
       user: publicUser(user),
     });
   } catch (error) {
@@ -49,18 +72,59 @@ authRouter.post('/auth/register', async (req, res, next) => {
   }
 });
 
-authRouter.post('/auth/login', async (req, res, next) => {
+authRouter.post('/auth/login', authRateLimit, async (req, res, next) => {
   try {
     const body = credentialsSchema.omit({ name: true }).parse(req.body);
+    const ip = clientIp(req);
+    assertNotLocked(body.email, ip);
+
     const user = store.findUserByEmail(body.email);
-    if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) {
+    const hash = user?.passwordHash ?? DUMMY_PASSWORD_HASH;
+    const passwordOk = await bcrypt.compare(body.password, hash);
+
+    if (!user || !passwordOk) {
+      registerLoginFailure(body.email, ip);
       throw new HttpError(401, 'E-mail ou senha inválidos.');
     }
 
+    clearLoginFailures(body.email, ip);
+    const tokens = issueTokenPair(user.id, user.email);
     res.json({
-      token: signToken(user.id, user.email),
+      ...tokens,
       user: publicUser(user),
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.post('/auth/refresh', refreshRateLimit, (req, res, next) => {
+  try {
+    const body = refreshSchema.parse(req.body);
+    const rotated = rotateRefreshToken(body.refreshToken);
+    const user = store.users.get(rotated.userId);
+    if (!user) {
+      throw new HttpError(401, 'Refresh token inválido.');
+    }
+
+    res.json({
+      accessToken: rotated.accessToken,
+      refreshToken: rotated.refreshToken,
+      expiresIn: rotated.expiresIn,
+      user: publicUser(user),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.post('/auth/logout', authRateLimit, (req, res, next) => {
+  try {
+    const body = refreshSchema.partial().parse(req.body ?? {});
+    if (body.refreshToken) {
+      revokeRefreshToken(body.refreshToken);
+    }
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }
@@ -75,12 +139,6 @@ authRouter.get('/auth/me', requireAuth, (req: AuthedRequest, res, next) => {
     next(error);
   }
 });
-
-function signToken(sub: string, email: string) {
-  return jwt.sign({ sub, email }, env.jwtSecret, {
-    expiresIn: env.jwtExpiresIn,
-  } as jwt.SignOptions);
-}
 
 function publicUser(user: { id: string; name: string; email: string }) {
   return {

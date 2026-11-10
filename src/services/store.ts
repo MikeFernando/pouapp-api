@@ -4,21 +4,25 @@ import type {
   BusinessProfile,
   Customer,
   Product,
+  RefreshSession,
   User,
 } from '../types/domain.js';
 
 const now = () => new Date().toISOString();
+
+export const BCRYPT_COST = 12;
 
 class MemoryStore {
   users = new Map<string, User>();
   customers = new Map<string, Customer>();
   products = new Map<string, Product>();
   profiles = new Map<string, BusinessProfile>();
+  refreshSessions = new Map<string, RefreshSession>();
 
   async seed() {
     if (this.users.size > 0) return;
 
-    const passwordHash = await bcrypt.hash('123456', 10);
+    const passwordHash = await bcrypt.hash('Edipo123', BCRYPT_COST);
     const user: User = {
       id: randomUUID(),
       name: 'Edipo Silva',
@@ -81,6 +85,39 @@ class MemoryStore {
     return this.listUsers().find(
       (user) => user.email.toLowerCase() === email.toLowerCase(),
     );
+  }
+
+  findRefreshByHash(tokenHash: string) {
+    for (const session of this.refreshSessions.values()) {
+      if (session.tokenHash === tokenHash) return session;
+    }
+    return undefined;
+  }
+
+  revokeRefreshFamily(familyId: string) {
+    const revokedAt = Date.now();
+    for (const session of this.refreshSessions.values()) {
+      if (session.familyId === familyId && !session.revokedAt) {
+        session.revokedAt = revokedAt;
+      }
+    }
+  }
+
+  revokeRefreshByHash(tokenHash: string) {
+    const session = this.findRefreshByHash(tokenHash);
+    if (session && !session.revokedAt) {
+      session.revokedAt = Date.now();
+    }
+    return session;
+  }
+
+  revokeAllRefreshForUser(userId: string) {
+    const revokedAt = Date.now();
+    for (const session of this.refreshSessions.values()) {
+      if (session.userId === userId && !session.revokedAt) {
+        session.revokedAt = revokedAt;
+      }
+    }
   }
 }
 

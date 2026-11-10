@@ -8,7 +8,7 @@ async function main() {
 
   app.listen(env.port, () => {
     console.log(`pouapp-api listening on http://localhost:${env.port}`);
-    console.log('seed login: edipo@pouapp.com / 123456');
+    console.log('seed login: edipo@pouapp.com / Edipo123');
   });
 }
 
