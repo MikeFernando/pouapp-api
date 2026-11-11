@@ -33,6 +33,28 @@ notesRouter.post('/notes', (req: AuthedRequest, res, next) => {
       throw new HttpError(404, 'Cliente não encontrado.');
     }
     const timestamp = new Date().toISOString();
+
+    // One draft note per customer — home vencimentos stay in sync with the app.
+    const existing = store
+      .listNotesForUser(userId)
+      .find(
+        (note) =>
+          note.customerId === body.customerId && note.status === 'draft',
+      );
+
+    if (existing) {
+      const updated = {
+        ...existing,
+        dueOn: body.dueOn,
+        totalCents: body.totalCents,
+        status: body.status,
+        updatedAt: timestamp,
+      };
+      store.notes.set(updated.id, updated);
+      res.json({ note: updated });
+      return;
+    }
+
     const note = {
       id: randomUUID(),
       userId,
