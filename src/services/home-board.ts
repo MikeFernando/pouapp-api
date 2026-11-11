@@ -165,8 +165,14 @@ export function buildHomeBoard(date: string, userId: string): HomeBoard {
   };
 }
 
+/** Calendar day in Brazil — avoids UTC flipping “hoje/amanhã” after 21h. */
 export function isoToday(now = new Date()): string {
-  return now.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
 }
 
 export type { Customer, CustomerNote, PostedSale, Receipt };
