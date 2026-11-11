@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error.js';
 import { store } from '../services/store.js';
 
@@ -15,9 +15,9 @@ const noteSchema = z.object({
   status: z.enum(['draft', 'delivered']).default('draft'),
 });
 
-notesRouter.get('/notes', (req, res) => {
+notesRouter.get('/notes', (req: AuthedRequest, res) => {
   const status = req.query.status as string | undefined;
-  let items = [...store.notes.values()];
+  let items = store.listNotesForUser(req.user!.sub);
   if (status === 'draft' || status === 'delivered') {
     items = items.filter((note) => note.status === status);
   }
@@ -25,15 +25,17 @@ notesRouter.get('/notes', (req, res) => {
   res.json({ items, total: items.length });
 });
 
-notesRouter.post('/notes', (req, res, next) => {
+notesRouter.post('/notes', (req: AuthedRequest, res, next) => {
   try {
     const body = noteSchema.parse(req.body);
-    if (!store.customers.has(body.customerId)) {
+    const userId = req.user!.sub;
+    if (!store.getCustomerForUser(body.customerId, userId)) {
       throw new HttpError(404, 'Cliente não encontrado.');
     }
     const timestamp = new Date().toISOString();
     const note = {
       id: randomUUID(),
+      userId,
       customerId: body.customerId,
       status: body.status,
       dueOn: body.dueOn,

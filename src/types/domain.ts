@@ -15,6 +15,8 @@ export interface User {
 
 export interface Customer {
   id: string;
+  /** Owning account — customers never cross tenants. */
+  userId: string;
   type: CustomerType;
   name: string;
   phone?: string;
@@ -25,6 +27,8 @@ export interface Customer {
 
 export interface Product {
   id: string;
+  /** Owning account — each tenant has its own catalog. */
+  userId: string;
   name: string;
   unit: CatalogUnit;
   salePriceCents: number;
@@ -91,6 +95,7 @@ export interface RefreshSession {
 
 export interface CustomerNote {
   id: string;
+  userId: string;
   customerId: string;
   status: NoteStatus;
   dueOn: string;
@@ -101,6 +106,7 @@ export interface CustomerNote {
 
 export interface PostedSale {
   id: string;
+  userId: string;
   customerId: string;
   totalCents: number;
   allocatedCents: number;
@@ -118,6 +124,7 @@ export interface ReceiptAllocation {
 
 export interface Receipt {
   id: string;
+  userId: string;
   customerId: string;
   paidOn: string;
   amountCents: number;

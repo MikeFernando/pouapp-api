@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error.js';
 import { store } from '../services/store.js';
 import type { CustomerStatus } from '../types/domain.js';
@@ -17,13 +17,14 @@ const customerSchema = z.object({
 
 customersRouter.use(requireAuth);
 
-customersRouter.get('/customers', (req, res) => {
+customersRouter.get('/customers', (req: AuthedRequest, res) => {
+  const userId = req.user!.sub;
   const search = String(req.query.search ?? '')
     .trim()
     .toLowerCase();
   const status = req.query.status as CustomerStatus | undefined;
 
-  let items = [...store.customers.values()];
+  let items = store.listCustomersForUser(userId);
   if (status === 'active' || status === 'inactive') {
     items = items.filter((customer) => customer.status === status);
   }
@@ -40,9 +41,12 @@ customersRouter.get('/customers', (req, res) => {
   });
 });
 
-customersRouter.get('/customers/:id', (req, res, next) => {
+customersRouter.get('/customers/:id', (req: AuthedRequest, res, next) => {
   try {
-    const customer = store.customers.get(req.params.id);
+    const customer = store.getCustomerForUser(
+      String(req.params.id),
+      req.user!.sub,
+    );
     if (!customer) throw new HttpError(404, 'Cliente não encontrado.');
     res.json({ customer });
   } catch (error) {
@@ -50,12 +54,13 @@ customersRouter.get('/customers/:id', (req, res, next) => {
   }
 });
 
-customersRouter.post('/customers', (req, res, next) => {
+customersRouter.post('/customers', (req: AuthedRequest, res, next) => {
   try {
     const body = customerSchema.parse(req.body);
     const timestamp = new Date().toISOString();
     const customer = {
       id: randomUUID(),
+      userId: req.user!.sub,
       type: body.type,
       name: body.name.trim(),
       phone: body.phone?.trim() || undefined,
@@ -70,12 +75,15 @@ customersRouter.post('/customers', (req, res, next) => {
   }
 });
 
-customersRouter.patch('/customers/:id/status', (req, res, next) => {
+customersRouter.patch('/customers/:id/status', (req: AuthedRequest, res, next) => {
   try {
     const body = z
       .object({ status: z.enum(['active', 'inactive']) })
       .parse(req.body);
-    const customer = store.customers.get(req.params.id);
+    const customer = store.getCustomerForUser(
+      String(req.params.id),
+      req.user!.sub,
+    );
     if (!customer) throw new HttpError(404, 'Cliente não encontrado.');
 
     const updated = {

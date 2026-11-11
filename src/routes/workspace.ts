@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { buildHomeBoard, isoToday } from '../services/home-board.js';
 
 export const workspaceRouter = Router();
 workspaceRouter.use(requireAuth);
 
-workspaceRouter.get('/workspace/home', (req, res, next) => {
+workspaceRouter.get('/workspace/home', (req: AuthedRequest, res, next) => {
   try {
     const query = z
       .object({
@@ -17,7 +17,7 @@ workspaceRouter.get('/workspace/home', (req, res, next) => {
       })
       .parse(req.query);
     const date = query.date ?? isoToday();
-    res.json({ home: buildHomeBoard(date) });
+    res.json({ home: buildHomeBoard(date, req.user!.sub) });
   } catch (error) {
     next(error);
   }

@@ -14,11 +14,10 @@ import type {
 import { readJsonFile, writeJsonAtomic } from './persistence.js';
 
 const now = () => new Date().toISOString();
-const isoToday = (date = new Date()) => date.toISOString().slice(0, 10);
 
 export const BCRYPT_COST = 12;
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 
 type StoreSnapshot = {
   version: number;
@@ -33,11 +32,32 @@ type StoreSnapshot = {
   receipts: Receipt[];
 };
 
-function addDaysIso(isoDate: string, days: number): string {
-  const [y, m, d] = isoDate.split('-').map(Number);
-  const date = new Date(Date.UTC(y!, m! - 1, d!));
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
+/** Default hortifruti catalog cloned for each new account. */
+const DEFAULT_PRODUCT_CATALOG: Array<
+  Omit<Product, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+> = [
+  { name: 'Banana nanica', unit: 'dozen', salePriceCents: 590, active: true },
+  { name: 'Tomate italiano', unit: 'box', salePriceCents: 5900, active: true },
+  { name: 'Alface crespa', unit: 'piece', salePriceCents: 350, active: true },
+  { name: 'Cenoura', unit: 'kilogram', salePriceCents: 450, active: true },
+  { name: 'Batata doce', unit: 'kilogram', salePriceCents: 490, active: true },
+  { name: 'Abacaxi', unit: 'piece', salePriceCents: 990, active: true },
+  { name: 'Ovos dúzia', unit: 'dozen', salePriceCents: 1200, active: true },
+  {
+    name: 'Ovos bandeja 30',
+    unit: 'piece',
+    salePriceCents: 1890,
+    active: true,
+  },
+];
+
+function hasUserId(value: unknown): value is { userId: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { userId?: unknown }).userId === 'string' &&
+    (value as { userId: string }).userId.length > 0
+  );
 }
 
 class TrackedMap<K, V> extends Map<K, V> {
@@ -98,12 +118,14 @@ class MemoryStore {
   }
 
   async load() {
-    const snapshot = await readJsonFile<StoreSnapshot>(env.dataFile);
+    const snapshot = await readJsonFile<StoreSnapshot & { version: number }>(
+      env.dataFile,
+    );
     if (!snapshot) {
       console.log(`store: no file at ${env.dataFile} (starting empty)`);
       return;
     }
-    if (snapshot.version !== STORE_VERSION) {
+    if (snapshot.version !== 1 && snapshot.version !== STORE_VERSION) {
       throw new Error(
         `Unsupported store version ${snapshot.version} (expected ${STORE_VERSION})`,
       );
@@ -112,8 +134,6 @@ class MemoryStore {
     this.hydrating = true;
     try {
       this.replaceMap(this.users, snapshot.users, (item) => item.id);
-      this.replaceMap(this.customers, snapshot.customers, (item) => item.id);
-      this.replaceMap(this.products, snapshot.products, (item) => item.id);
       this.replaceMap(this.profiles, snapshot.profiles, (item) => item.userId);
       this.replaceMap(this.licenses, snapshot.licenses, (item) => item.userId);
       this.replaceMap(
@@ -121,11 +141,53 @@ class MemoryStore {
         pruneRefreshSessions(snapshot.refreshSessions ?? []),
         (item) => item.id,
       );
-      this.replaceMap(this.notes, snapshot.notes, (item) => item.id);
-      this.replaceMap(this.sales, snapshot.sales, (item) => item.id);
-      this.replaceMap(this.receipts, snapshot.receipts, (item) => item.id);
+
+      if (snapshot.version === 1) {
+        // v1 shared customers/products across all accounts — drop them.
+        this.customers.clear();
+        this.products.clear();
+        this.notes.clear();
+        this.sales.clear();
+        this.receipts.clear();
+      } else {
+        this.replaceMap(
+          this.customers,
+          (snapshot.customers ?? []).filter(hasUserId),
+          (item) => item.id,
+        );
+        this.replaceMap(
+          this.products,
+          (snapshot.products ?? []).filter(hasUserId),
+          (item) => item.id,
+        );
+        this.replaceMap(
+          this.notes,
+          (snapshot.notes ?? []).filter(hasUserId),
+          (item) => item.id,
+        );
+        this.replaceMap(
+          this.sales,
+          (snapshot.sales ?? []).filter(hasUserId),
+          (item) => item.id,
+        );
+        this.replaceMap(
+          this.receipts,
+          (snapshot.receipts ?? []).filter(hasUserId),
+          (item) => item.id,
+        );
+      }
     } finally {
       this.hydrating = false;
+    }
+
+    if (snapshot.version === 1) {
+      for (const user of this.users.values()) {
+        this.provisionTenant(user.id);
+      }
+      await this.flush();
+      console.log(
+        `store: migrated v1→v2 (tenant isolation) — ${this.users.size} user(s)`,
+      );
     }
 
     console.log(
@@ -133,140 +195,35 @@ class MemoryStore {
     );
   }
 
+  /**
+   * Kept for boot compatibility. Tenant data is created in
+   * [provisionTenant] on register — never shared globally.
+   */
   async seed() {
-    // Catalog/demo data only — accounts are created via /auth/register.
-    if (this.customers.size > 0) return;
-
-    this.hydrating = true;
-    try {
-      const seedCustomers: Array<
-        Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>
-      > = [
-        {
-          type: 'individual',
-          name: 'Beatriz Nunes',
-          phone: '15992639023',
-          status: 'active',
-        },
-        {
-          type: 'individual',
-          name: 'João Oliveira',
-          phone: '11988887777',
-          status: 'active',
-        },
-        {
-          type: 'individual',
-          name: 'Marina Costa',
-          phone: '11977776666',
-          status: 'active',
-        },
-      ];
-      const createdCustomers: Customer[] = [];
-      for (const item of seedCustomers) {
-        const customer: Customer = {
-          ...item,
-          id: randomUUID(),
-          createdAt: now(),
-          updatedAt: now(),
-        };
-        this.customers.set(customer.id, customer);
-        createdCustomers.push(customer);
-      }
-
-      const seedProducts: Array<
-        Omit<Product, 'id' | 'createdAt' | 'updatedAt'>
-      > = [
-        { name: 'Banana nanica', unit: 'dozen', salePriceCents: 590, active: true },
-        {
-          name: 'Tomate italiano',
-          unit: 'box',
-          salePriceCents: 5900,
-          active: true,
-        },
-        { name: 'Alface crespa', unit: 'piece', salePriceCents: 350, active: true },
-        { name: 'Cenoura', unit: 'kilogram', salePriceCents: 450, active: true },
-        {
-          name: 'Batata doce',
-          unit: 'kilogram',
-          salePriceCents: 490,
-          active: true,
-        },
-        { name: 'Abacaxi', unit: 'piece', salePriceCents: 990, active: true },
-        { name: 'Ovos dúzia', unit: 'dozen', salePriceCents: 1200, active: true },
-        {
-          name: 'Ovos bandeja 30',
-          unit: 'piece',
-          salePriceCents: 1890,
-          active: true,
-        },
-      ];
-      for (const item of seedProducts) {
-        const product: Product = {
-          ...item,
-          id: randomUUID(),
-          createdAt: now(),
-          updatedAt: now(),
-        };
-        this.products.set(product.id, product);
-      }
-
-      const today = isoToday();
-      const beatriz = createdCustomers[0]!;
-      const joao = createdCustomers[1]!;
-      const marina = createdCustomers[2]!;
-      const timestamp = now();
-
-      const upcomingSale: PostedSale = {
-        id: randomUUID(),
-        customerId: beatriz.id,
-        totalCents: 2370,
-        allocatedCents: 0,
-        occurredOn: today,
-        dueOn: addDaysIso(today, 14),
-        sale: true,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-      this.sales.set(upcomingSale.id, upcomingSale);
-
-      const tomorrowNote: CustomerNote = {
-        id: randomUUID(),
-        customerId: joao.id,
-        status: 'draft',
-        dueOn: addDaysIso(today, 1),
-        totalCents: 4500,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-      this.notes.set(tomorrowNote.id, tomorrowNote);
-
-      const todaySale: PostedSale = {
-        id: randomUUID(),
-        customerId: marina.id,
-        totalCents: 1890,
-        allocatedCents: 0,
-        occurredOn: today,
-        dueOn: today,
-        sale: true,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-      this.sales.set(todaySale.id, todaySale);
-
-      const receipt: Receipt = {
-        id: randomUUID(),
-        customerId: joao.id,
-        paidOn: today,
-        amountCents: 1200,
-        allocations: [],
-        createdAt: timestamp,
-      };
-      this.receipts.set(receipt.id, receipt);
-    } finally {
-      this.hydrating = false;
+    // Ensure every existing account has its own product catalog.
+    for (const user of this.users.values()) {
+      this.provisionTenant(user.id);
     }
+  }
 
-    await this.flush();
+  /** Creates the default product catalog for a tenant (idempotent). */
+  provisionTenant(userId: string) {
+    const hasCatalog = [...this.products.values()].some(
+      (product) => product.userId === userId,
+    );
+    if (hasCatalog) return;
+
+    const timestamp = now();
+    for (const item of DEFAULT_PRODUCT_CATALOG) {
+      const product: Product = {
+        ...item,
+        id: randomUUID(),
+        userId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      this.products.set(product.id, product);
+    }
   }
 
   listUsers() {
@@ -276,6 +233,44 @@ class MemoryStore {
   findUserByEmail(email: string) {
     return this.listUsers().find(
       (user) => user.email.toLowerCase() === email.toLowerCase(),
+    );
+  }
+
+  listCustomersForUser(userId: string) {
+    return [...this.customers.values()].filter(
+      (customer) => customer.userId === userId,
+    );
+  }
+
+  getCustomerForUser(customerId: string, userId: string) {
+    const customer = this.customers.get(customerId);
+    if (!customer || customer.userId !== userId) return undefined;
+    return customer;
+  }
+
+  listProductsForUser(userId: string) {
+    return [...this.products.values()].filter(
+      (product) => product.userId === userId,
+    );
+  }
+
+  getProductForUser(productId: string, userId: string) {
+    const product = this.products.get(productId);
+    if (!product || product.userId !== userId) return undefined;
+    return product;
+  }
+
+  listNotesForUser(userId: string) {
+    return [...this.notes.values()].filter((note) => note.userId === userId);
+  }
+
+  listSalesForUser(userId: string) {
+    return [...this.sales.values()].filter((sale) => sale.userId === userId);
+  }
+
+  listReceiptsForUser(userId: string) {
+    return [...this.receipts.values()].filter(
+      (receipt) => receipt.userId === userId,
     );
   }
 

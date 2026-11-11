@@ -70,6 +70,8 @@ authRouter.post('/auth/register', authRateLimit, async (req, res, next) => {
       updatedAt: now,
     });
     store.ensureLicense(user.id, { trialDays: env.licenseTrialDays });
+    // Empty customers; private product catalog for this account only.
+    store.provisionTenant(user.id);
 
     const tokens = issueTokenPair(user.id, user.email);
     res.status(201).json({

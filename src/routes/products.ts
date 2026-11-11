@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error.js';
 import { store } from '../services/store.js';
 
@@ -16,11 +16,11 @@ const productSchema = z.object({
 
 productsRouter.use(requireAuth);
 
-productsRouter.get('/products', (req, res) => {
+productsRouter.get('/products', (req: AuthedRequest, res) => {
   const search = String(req.query.search ?? '')
     .trim()
     .toLowerCase();
-  let items = [...store.products.values()];
+  let items = store.listProductsForUser(req.user!.sub);
   if (search) {
     items = items.filter((product) =>
       product.name.toLowerCase().includes(search),
@@ -30,12 +30,13 @@ productsRouter.get('/products', (req, res) => {
   res.json({ items, total: items.length });
 });
 
-productsRouter.post('/products', (req, res, next) => {
+productsRouter.post('/products', (req: AuthedRequest, res, next) => {
   try {
     const body = productSchema.parse(req.body);
     const timestamp = new Date().toISOString();
     const product = {
       id: randomUUID(),
+      userId: req.user!.sub,
       name: body.name.trim(),
       unit: body.unit,
       salePriceCents: body.salePriceCents,
@@ -50,10 +51,13 @@ productsRouter.post('/products', (req, res, next) => {
   }
 });
 
-productsRouter.patch('/products/:id', (req, res, next) => {
+productsRouter.patch('/products/:id', (req: AuthedRequest, res, next) => {
   try {
     const body = productSchema.partial().parse(req.body);
-    const product = store.products.get(req.params.id);
+    const product = store.getProductForUser(
+      String(req.params.id),
+      req.user!.sub,
+    );
     if (!product) throw new HttpError(404, 'Produto não encontrado.');
 
     const updated = {

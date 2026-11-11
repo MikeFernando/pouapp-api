@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error.js';
 import { store } from '../services/store.js';
 
@@ -22,9 +22,9 @@ const receiptSchema = z.object({
     .default([]),
 });
 
-receiptsRouter.get('/receipts', (req, res) => {
+receiptsRouter.get('/receipts', (req: AuthedRequest, res) => {
   const paidOn = String(req.query.paidOn ?? '').trim();
-  let items = [...store.receipts.values()];
+  let items = store.listReceiptsForUser(req.user!.sub);
   if (paidOn) {
     items = items.filter((receipt) => receipt.paidOn === paidOn);
   }
@@ -32,10 +32,11 @@ receiptsRouter.get('/receipts', (req, res) => {
   res.json({ items, total: items.length });
 });
 
-receiptsRouter.post('/receipts', (req, res, next) => {
+receiptsRouter.post('/receipts', (req: AuthedRequest, res, next) => {
   try {
     const body = receiptSchema.parse(req.body);
-    if (!store.customers.has(body.customerId)) {
+    const userId = req.user!.sub;
+    if (!store.getCustomerForUser(body.customerId, userId)) {
       throw new HttpError(404, 'Cliente não encontrado.');
     }
 
@@ -43,7 +44,9 @@ receiptsRouter.post('/receipts', (req, res, next) => {
     const allocations = [];
     for (const allocation of body.allocations) {
       const sale = store.sales.get(allocation.saleId);
-      if (!sale) throw new HttpError(404, 'Venda não encontrada.');
+      if (!sale || sale.userId !== userId) {
+        throw new HttpError(404, 'Venda não encontrada.');
+      }
       if (sale.customerId !== body.customerId) {
         throw new HttpError(400, 'Alocação de outro cliente.');
       }
@@ -59,7 +62,8 @@ receiptsRouter.post('/receipts', (req, res, next) => {
 
     // Auto-allocate leftover FIFO by due date for this customer.
     if (remaining > 0) {
-      const openSales = [...store.sales.values()]
+      const openSales = store
+        .listSalesForUser(userId)
         .filter(
           (sale) =>
             sale.customerId === body.customerId &&
@@ -80,6 +84,7 @@ receiptsRouter.post('/receipts', (req, res, next) => {
 
     const receipt = {
       id: randomUUID(),
+      userId,
       customerId: body.customerId,
       paidOn: body.paidOn,
       amountCents: body.amountCents,

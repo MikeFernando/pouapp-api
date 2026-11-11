@@ -49,13 +49,13 @@ function mergeDue(
   });
 }
 
-export function buildHomeBoard(date: string): HomeBoard {
+export function buildHomeBoard(date: string, userId: string): HomeBoard {
   const tomorrow = addDays(date, 1);
-  const sales = [...store.sales.values()];
-  const notes = [...store.notes.values()].filter(
-    (note) => note.status === 'draft' && note.totalCents > 0,
-  );
-  const receipts = [...store.receipts.values()];
+  const sales = store.listSalesForUser(userId);
+  const notes = store
+    .listNotesForUser(userId)
+    .filter((note) => note.status === 'draft' && note.totalCents > 0);
+  const receipts = store.listReceiptsForUser(userId);
 
   const receivedTodayCents = receipts
     .filter((receipt) => receipt.paidOn === date)
