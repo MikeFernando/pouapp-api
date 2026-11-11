@@ -1,4 +1,4 @@
-import type { License, LicenseView, User } from '../types/domain.js';
+import type { License, LicenseView } from '../types/domain.js';
 import { store } from './store.js';
 
 const PAYMENT_REQUIRED_MESSAGE =
@@ -16,18 +16,31 @@ export function isLicenseActive(license: License, at = new Date()): boolean {
   return license.status === 'active' && withinPaidPeriod;
 }
 
-function findOtherActivePaid(
+/**
+ * If this unpaid account's Stripe customer is already linked to another
+ * paid user, point them to that email. Multi-tenant: other people's
+ * subscriptions must not block this account.
+ */
+function findPaidEmailForStripeCustomer(
+  license: License,
   exceptUserId: string,
-  at = new Date(),
-): { license: License; user: User } | undefined {
-  for (const license of store.licenses.values()) {
-    if (license.userId === exceptUserId) continue;
-    if (!isLicenseActive(license, at)) continue;
-    const user = store.users.get(license.userId);
-    if (!user) continue;
-    return { license, user };
+): string | null {
+  const customerId = license.stripeCustomerId;
+  const subscriptionId = license.stripeSubscriptionId;
+  if (!customerId && !subscriptionId) return null;
+
+  for (const other of store.licenses.values()) {
+    if (other.userId === exceptUserId) continue;
+    if (!isLicenseActive(other)) continue;
+    const sameCustomer =
+      Boolean(customerId) && other.stripeCustomerId === customerId;
+    const sameSubscription =
+      Boolean(subscriptionId) && other.stripeSubscriptionId === subscriptionId;
+    if (!sameCustomer && !sameSubscription) continue;
+    const user = store.users.get(other.userId);
+    if (user) return user.email;
   }
-  return undefined;
+  return null;
 }
 
 export function toLicenseView(license: License, at = new Date()): LicenseView {
@@ -43,15 +56,15 @@ export function toLicenseView(license: License, at = new Date()): LicenseView {
     };
   }
 
-  const otherPaid = findOtherActivePaid(license.userId, at);
-  if (otherPaid) {
+  const paidEmail = findPaidEmailForStripeCustomer(license, license.userId);
+  if (paidEmail) {
     return {
       active: false,
       status: license.status,
       paidUntil: license.paidUntil,
       message: WRONG_EMAIL_MESSAGE,
       reason: 'wrong_email',
-      paidEmail: otherPaid.user.email,
+      paidEmail,
     };
   }
 
