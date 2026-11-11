@@ -190,6 +190,8 @@ class MemoryStore {
       );
     }
 
+    this.consolidateDraftNotes();
+
     console.log(
       `store: loaded ${this.users.size} user(s), ${this.licenses.size} license(s) from ${env.dataFile}`,
     );
@@ -262,6 +264,25 @@ class MemoryStore {
 
   listNotesForUser(userId: string) {
     return [...this.notes.values()].filter((note) => note.userId === userId);
+  }
+
+  /** Keep the newest open draft per customer; delete the rest. */
+  consolidateDraftNotes(userId?: string) {
+    const byCustomer = new Map<string, CustomerNote>();
+    const staleIds: string[] = [];
+    for (const note of this.notes.values()) {
+      if (userId && note.userId !== userId) continue;
+      if (note.status !== 'draft') continue;
+      const key = `${note.userId}:${note.customerId}`;
+      const current = byCustomer.get(key);
+      if (!current || note.updatedAt > current.updatedAt) {
+        if (current) staleIds.push(current.id);
+        byCustomer.set(key, note);
+      } else {
+        staleIds.push(note.id);
+      }
+    }
+    for (const id of staleIds) this.notes.delete(id);
   }
 
   listSalesForUser(userId: string) {

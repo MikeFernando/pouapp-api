@@ -15,8 +15,9 @@ function addDays(isoDate: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function customerName(customerId: string): string {
-  return store.customers.get(customerId)?.name?.trim() || 'Cliente';
+function customerName(customerId: string): string | null {
+  const name = store.customers.get(customerId)?.name?.trim();
+  return name && name.length > 0 ? name : null;
 }
 
 function openCents(sale: PostedSale): number {
@@ -37,24 +38,40 @@ function mergeDue(
   if (preferEarlierDue && next.dueOn < current.dueOn) {
     map.set(next.customerId, {
       ...next,
-      openNotes: (current.openNotes ?? 0) + (next.openNotes ?? 0),
+      openNotes: 1,
     });
     return;
   }
   map.set(next.customerId, {
     ...current,
     openCents: current.openCents + next.openCents,
-    openNotes: (current.openNotes ?? 0) + (next.openNotes ?? 0),
+    openNotes: 1,
     settled: Boolean(current.settled && next.settled),
   });
+}
+
+/** One draft note per customer — keep the newest `updatedAt`. */
+function openDraftNotes(userId: string): CustomerNote[] {
+  store.consolidateDraftNotes(userId);
+  const byCustomer = new Map<string, CustomerNote>();
+  for (const note of store.listNotesForUser(userId)) {
+    if (note.status !== 'draft' || note.totalCents <= 0) continue;
+    if (!customerName(note.customerId)) {
+      store.notes.delete(note.id);
+      continue;
+    }
+    const current = byCustomer.get(note.customerId);
+    if (!current || note.updatedAt > current.updatedAt) {
+      byCustomer.set(note.customerId, note);
+    }
+  }
+  return [...byCustomer.values()];
 }
 
 export function buildHomeBoard(date: string, userId: string): HomeBoard {
   const tomorrow = addDays(date, 1);
   const sales = store.listSalesForUser(userId);
-  const notes = store
-    .listNotesForUser(userId)
-    .filter((note) => note.status === 'draft' && note.totalCents > 0);
+  const notes = openDraftNotes(userId);
   const receipts = store.listReceiptsForUser(userId);
 
   const receivedTodayCents = receipts
@@ -64,13 +81,15 @@ export function buildHomeBoard(date: string, userId: string): HomeBoard {
   const todayMap = new Map<string, HomeDueItem>();
   for (const sale of sales) {
     if (sale.dueOn !== date) continue;
+    const name = customerName(sale.customerId);
+    if (!name) continue;
     const open = openCents(sale);
     const total = sale.totalCents;
     mergeDue(
       todayMap,
       {
         customerId: sale.customerId,
-        customerName: customerName(sale.customerId),
+        customerName: name,
         openCents: open > 0 ? open : total,
         dueOn: date,
         settled: open <= 0,
@@ -81,9 +100,11 @@ export function buildHomeBoard(date: string, userId: string): HomeBoard {
   for (const note of notes) {
     if (note.dueOn !== date) continue;
     if (todayMap.has(note.customerId)) continue;
+    const name = customerName(note.customerId);
+    if (!name) continue;
     todayMap.set(note.customerId, {
       customerId: note.customerId,
-      customerName: customerName(note.customerId),
+      customerName: name,
       openCents: note.totalCents,
       dueOn: date,
       settled: false,
@@ -97,9 +118,11 @@ export function buildHomeBoard(date: string, userId: string): HomeBoard {
   for (const sale of sales) {
     const open = openCents(sale);
     if (open <= 0) continue;
+    const name = customerName(sale.customerId);
+    if (!name) continue;
     const item: HomeDueItem = {
       customerId: sale.customerId,
-      customerName: customerName(sale.customerId),
+      customerName: name,
       openCents: open,
       dueOn: sale.dueOn,
       settled: false,
@@ -112,35 +135,24 @@ export function buildHomeBoard(date: string, userId: string): HomeBoard {
   }
 
   for (const note of notes) {
+    if (tomorrowMap.has(note.customerId) || upcomingMap.has(note.customerId)) {
+      // Sales already represent this customer; notes never stack on top.
+      continue;
+    }
+    const name = customerName(note.customerId);
+    if (!name) continue;
     const item: HomeDueItem = {
       customerId: note.customerId,
-      customerName: customerName(note.customerId),
+      customerName: name,
       openCents: note.totalCents,
       dueOn: note.dueOn,
       settled: false,
       openNotes: 1,
     };
     if (note.dueOn === tomorrow) {
-      if (!tomorrowMap.has(note.customerId)) tomorrowMap.set(note.customerId, item);
-      else {
-        const current = tomorrowMap.get(note.customerId)!;
-        tomorrowMap.set(note.customerId, {
-          ...current,
-          openCents: current.openCents + note.totalCents,
-          openNotes: (current.openNotes ?? 0) + 1,
-        });
-      }
+      tomorrowMap.set(note.customerId, item);
     } else if (note.dueOn > tomorrow) {
-      const current = upcomingMap.get(note.customerId);
-      if (!current || note.dueOn < current.dueOn) {
-        upcomingMap.set(note.customerId, item);
-      } else if (note.dueOn === current.dueOn) {
-        upcomingMap.set(note.customerId, {
-          ...current,
-          openCents: current.openCents + note.totalCents,
-          openNotes: (current.openNotes ?? 0) + 1,
-        });
-      }
+      upcomingMap.set(note.customerId, item);
     }
   }
 

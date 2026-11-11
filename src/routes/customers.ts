@@ -10,7 +10,11 @@ export const customersRouter = Router();
 
 const customerSchema = z.object({
   name: z.string().min(2).max(120),
-  phone: z.string().optional(),
+  phone: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined)),
   type: z.enum(['individual', 'company']).default('individual'),
   status: z.enum(['active', 'inactive']).default('active'),
 });

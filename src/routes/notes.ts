@@ -34,13 +34,18 @@ notesRouter.post('/notes', (req: AuthedRequest, res, next) => {
     }
     const timestamp = new Date().toISOString();
 
-    // One draft note per customer — home vencimentos stay in sync with the app.
-    const existing = store
+    // Hard rule: one open draft per customer. Drop siblings, then upsert.
+    const drafts = store
       .listNotesForUser(userId)
-      .find(
+      .filter(
         (note) =>
           note.customerId === body.customerId && note.status === 'draft',
-      );
+      )
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const existing = drafts[0];
+    for (const extra of drafts.slice(1)) {
+      store.notes.delete(extra.id);
+    }
 
     if (existing) {
       const updated = {
