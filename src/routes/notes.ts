@@ -76,3 +76,19 @@ notesRouter.post('/notes', (req: AuthedRequest, res, next) => {
     next(error);
   }
 });
+
+notesRouter.delete('/notes/drafts/:customerId', (req: AuthedRequest, res, next) => {
+  try {
+    const customerId = String(req.params.customerId);
+    const userId = req.user!.sub;
+    let removed = 0;
+    for (const note of store.listNotesForUser(userId)) {
+      if (note.customerId !== customerId || note.status !== 'draft') continue;
+      store.notes.delete(note.id);
+      removed += 1;
+    }
+    res.json({ removed });
+  } catch (error) {
+    next(error);
+  }
+});
