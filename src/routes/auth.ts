@@ -31,11 +31,21 @@ const strongPasswordSchema = z
   .regex(/[A-Za-z]/, 'Senha deve conter pelo menos uma letra.')
   .regex(/[0-9]/, 'Senha deve conter pelo menos um número.');
 
-const registerSchema = z.object({
-  email: z.string().email().transform((value) => value.trim().toLowerCase()),
-  password: strongPasswordSchema,
-  name: z.string().min(2).max(120).optional(),
-});
+/** Register uses a single password field — no confirmation required. */
+const registerSchema = z
+  .object({
+    email: z.string().email().transform((value) => value.trim().toLowerCase()),
+    password: strongPasswordSchema,
+    name: z.string().min(2).max(120).optional(),
+    // Older clients may still send these; they are ignored.
+    passwordConfirmation: z.string().optional(),
+    confirmPassword: z.string().optional(),
+  })
+  .transform((value) => ({
+    email: value.email,
+    password: value.password,
+    name: value.name,
+  }));
 
 /** Login only checks presence — wrong passwords become 401, not 400. */
 const loginSchema = z.object({
@@ -145,6 +155,37 @@ authRouter.get('/auth/me', requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const user = store.users.get(req.user!.sub);
     if (!user) throw new HttpError(404, 'Usuário não encontrado.');
+    res.json({ user: publicUser(user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const updateMeSchema = z.object({
+  name: z
+    .string()
+    .min(2, 'Informe o nome.')
+    .max(120)
+    .transform((value) => value.trim()),
+});
+
+authRouter.patch('/auth/me', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const body = updateMeSchema.parse(req.body);
+    const user = store.users.get(req.user!.sub);
+    if (!user) throw new HttpError(404, 'Usuário não encontrado.');
+
+    user.name = body.name;
+    user.updatedAt = new Date().toISOString();
+    store.users.set(user.id, user);
+
+    const profile = store.profiles.get(user.id);
+    if (profile) {
+      profile.receiverName = body.name;
+      profile.updatedAt = user.updatedAt;
+      store.profiles.set(user.id, profile);
+    }
+
     res.json({ user: publicUser(user) });
   } catch (error) {
     next(error);

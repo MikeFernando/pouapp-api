@@ -25,7 +25,7 @@ API em `http://localhost:3333`.
 
 ## Conta
 
-Não há usuário seed. Crie a conta no app ou via `POST /auth/register` (senha forte: 8+ com letra e número).
+Não há usuário seed. Crie a conta no app ou via `POST /auth/register` (senha forte: 8+ com letra e número; sem confirmação de senha).
 
 ## Rotas
 
@@ -33,6 +33,7 @@ Não há usuário seed. Crie a conta no app ou via `POST /auth/register` (senha 
 |--------|------|------|-----------|
 | GET | `/health` | não | healthcheck |
 | POST | `/auth/register` | não | cria conta |
+| PATCH | `/auth/me` | sim | atualiza o nome do usuário |
 | POST | `/auth/login` | não | login (access + refresh) |
 | POST | `/auth/refresh` | body `refreshToken` | rotaciona tokens |
 | POST | `/auth/logout` | body `refreshToken` | revoga refresh |
