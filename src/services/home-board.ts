@@ -129,7 +129,8 @@ export function buildHomeBoard(date: string, userId: string): HomeBoard {
     };
     if (sale.dueOn === tomorrow) {
       mergeDue(tomorrowMap, item, true);
-    } else if (sale.dueOn > tomorrow) {
+    } else if (sale.dueOn > tomorrow || sale.dueOn < date) {
+      // Future and overdue share upcomingDues; the app splits by local day.
       mergeDue(upcomingMap, item, true);
     }
   }
@@ -151,7 +152,7 @@ export function buildHomeBoard(date: string, userId: string): HomeBoard {
     };
     if (note.dueOn === tomorrow) {
       tomorrowMap.set(note.customerId, item);
-    } else if (note.dueOn > tomorrow) {
+    } else if (note.dueOn > tomorrow || note.dueOn < date) {
       upcomingMap.set(note.customerId, item);
     }
   }
