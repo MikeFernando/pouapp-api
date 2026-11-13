@@ -101,3 +101,22 @@ customersRouter.patch('/customers/:id/status', (req: AuthedRequest, res, next) =
     next(error);
   }
 });
+
+customersRouter.delete('/customers/:id', (req: AuthedRequest, res, next) => {
+  try {
+    const userId = req.user!.sub;
+    const customerId = String(req.params.id);
+    const customer = store.getCustomerForUser(customerId, userId);
+    if (!customer) throw new HttpError(404, 'Cliente não encontrado.');
+
+    for (const note of store.listNotesForUser(userId)) {
+      if (note.customerId === customerId) {
+        store.notes.delete(note.id);
+      }
+    }
+    store.customers.delete(customerId);
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
